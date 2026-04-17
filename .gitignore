@@ -1,0 +1,11 @@
+# .gitignore
+build/
+bin/
+lib/
+*.onnx
+*.pth
+__pycache__/
+.venv/
+.vscode-root/
+project_plan.md
+setup_env.md
