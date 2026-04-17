@@ -11,11 +11,11 @@ public:
     InferenceEngine(const std::string& model_path);
     ~InferenceEngine();
 
-    // Prevent copying
+    // 禁用拷贝构造和赋值操作
     InferenceEngine(const InferenceEngine&) = delete;
     InferenceEngine& operator=(const InferenceEngine&) = delete;
 
-    // Single inference: takes raw image bytes (e.g. JPEG/PNG), returns (class_id, confidence)
+    // 单次推理：接收原始图像字节流（如 JPEG/PNG），返回 (类别 ID, 置信度)
     std::pair<int, float> Predict(const std::vector<uint8_t>& image_bytes);
 
 private:

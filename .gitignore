@@ -10,4 +10,5 @@ __pycache__/
 .vscode-root/
 project_plan.md
 setup_env.md
+CLAUDE.md
 test_images/
