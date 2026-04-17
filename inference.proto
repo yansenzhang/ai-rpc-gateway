@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package inference;
+
+// RPC 服务定义
+service InferenceService {
+  // 单个推理请求方法
+  rpc Predict(PredictRequest) returns (PredictResponse);
+}
+
+// 预测请求消息
+message PredictRequest {
+  // 图像数据：为追求极致性能，如果是原始字节流需要 C++ 解码，
+  // 或者假设客户端已经预处理成 Float Array 字节传输 (1*3*224*224)。
+  // 此处根据指示暂定为 image_bytes。
+  bytes image_bytes = 1;
+}
+
+// 预测响应消息
+message PredictResponse {
+  int32 class_id = 1;
+  float confidence = 2;
+}

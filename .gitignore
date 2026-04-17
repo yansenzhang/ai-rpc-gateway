@@ -3,6 +3,7 @@ build/
 bin/
 lib/
 *.onnx
+*.onnx.data
 *.pth
 __pycache__/
 .venv/
