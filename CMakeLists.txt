@@ -71,3 +71,9 @@ include_directories(
 #     ZLIB::ZLIB
 #     Threads::Threads
 # )
+
+add_executable(test_inference test_inference.cpp inference_engine.cpp)
+target_link_libraries(test_inference
+    ${ONNXRUNTIME_LIB}
+    Threads::Threads
+)

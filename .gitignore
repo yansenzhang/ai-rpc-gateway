@@ -10,3 +10,4 @@ __pycache__/
 .vscode-root/
 project_plan.md
 setup_env.md
+test_images/
