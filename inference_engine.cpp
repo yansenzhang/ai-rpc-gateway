@@ -125,3 +125,76 @@ std::pair<int, float> InferenceEngine::Predict(const std::vector<uint8_t>& image
 
     return {best_class, best_prob};
 }
+
+std::vector<std::pair<int, float>> InferenceEngine::PredictBatch(const std::vector<std::vector<uint8_t>>& batch_image_bytes) {
+    if (batch_image_bytes.empty()) return {};
+
+    size_t batch_size = batch_image_bytes.size();
+    size_t single_image_elements = 3 * 224 * 224;
+
+    // 1. 预处理并拼接所有输入张量
+    std::vector<float> batched_tensor_values;
+    batched_tensor_values.reserve(batch_size * single_image_elements);
+
+    for (const auto& image_bytes : batch_image_bytes) {
+        std::vector<float> tensor_data = Preprocess(image_bytes);
+        batched_tensor_values.insert(batched_tensor_values.end(), tensor_data.begin(), tensor_data.end());
+    }
+
+    // 2. 准备输入张量
+    std::vector<int64_t> input_shape = {static_cast<int64_t>(batch_size), 3, 224, 224};
+
+    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+        memory_info_,
+        batched_tensor_values.data(),
+        batched_tensor_values.size(),
+        input_shape.data(),
+        input_shape.size()
+    );
+
+    // 3. 执行推理
+    auto output_tensors = session_->Run(
+        Ort::RunOptions{nullptr},
+        input_node_names_.data(),
+        &input_tensor, 1,
+        output_node_names_.data(), 1
+    );
+
+    // 4. 后处理 (分别寻找每个样本的 argmax)
+    float* floatarr = output_tensors.front().GetTensorMutableData<float>();
+    auto type_info = output_tensors.front().GetTensorTypeAndShapeInfo();
+    auto output_shape = type_info.GetShape();
+
+    // ResNet18 的输出通常是 [batch_size, 1000]
+    size_t num_classes = output_shape[1];
+
+    std::vector<std::pair<int, float>> results;
+    results.reserve(batch_size);
+
+    for (size_t b = 0; b < batch_size; ++b) {
+        float* sample_logits = floatarr + (b * num_classes);
+
+        // 计算 Softmax
+        std::vector<float> probs(num_classes);
+        float max_val = *std::max_element(sample_logits, sample_logits + num_classes);
+        float sum_exp = 0.0f;
+        for (size_t i = 0; i < num_classes; ++i) {
+            probs[i] = std::exp(sample_logits[i] - max_val);
+            sum_exp += probs[i];
+        }
+
+        int best_class = 0;
+        float best_prob = 0.0f;
+        for (size_t i = 0; i < num_classes; ++i) {
+            probs[i] /= sum_exp;
+            if (probs[i] > best_prob) {
+                best_prob = probs[i];
+                best_class = static_cast<int>(i);
+            }
+        }
+
+        results.push_back({best_class, best_prob});
+    }
+
+    return results;
+}

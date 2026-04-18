@@ -18,6 +18,9 @@ public:
     // 单次推理：接收原始图像字节流（如 JPEG/PNG），返回 (类别 ID, 置信度)
     std::pair<int, float> Predict(const std::vector<uint8_t>& image_bytes);
 
+    // 批量推理：接收一组原始图像字节流，返回对应的 (类别 ID, 置信度) 列表
+    std::vector<std::pair<int, float>> PredictBatch(const std::vector<std::vector<uint8_t>>& batch_image_bytes);
+
 private:
     std::vector<float> Preprocess(const std::vector<uint8_t>& image_bytes);
 

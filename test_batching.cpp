@@ -29,7 +29,7 @@ void Worker(std::shared_ptr<BatchingQueue> queue, const std::vector<uint8_t>& im
     try {
         auto future = queue->Submit(image_bytes);
         auto result = future.get();
-        if (result.first == 258) {
+        if (result.first == 111) {
             success_count++;
         } else {
             std::cerr << "Thread " << id << " unexpected result: Class ID: " << result.first << std::endl;

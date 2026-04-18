@@ -38,15 +38,14 @@ void BatchingQueue::WorkerThread() {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             
-            // Wait until queue is not empty or we need to stop
+            // 等待队列不为空，或收到停止信号
             cv_.wait(lock, [this] { return !queue_.empty() || stop_; });
             
             if (stop_ && queue_.empty()) {
                 break;
             }
             
-            // At this point, queue is NOT empty. We have our first request.
-            // Wait for max_batch_size or max_latency timeout
+            // 此时队列不为空，开始计时等待凑齐 max_batch_size 或到达 max_latency
             auto timeout_time = std::chrono::steady_clock::now() + max_latency_;
             cv_.wait_until(lock, timeout_time, [this] {
                 return queue_.size() >= max_batch_size_ || stop_;
@@ -56,6 +55,7 @@ void BatchingQueue::WorkerThread() {
                 break;
             }
 
+            // 提取一个 batch 的请求
             size_t batch_size = std::min(queue_.size(), max_batch_size_);
             for (size_t i = 0; i < batch_size; ++i) {
                 batch.push_back(std::move(queue_[i]));
@@ -67,14 +67,20 @@ void BatchingQueue::WorkerThread() {
             continue;
         }
 
-        // 调用 InferenceEngine 进行批量推理
+        // 调用 InferenceEngine 进行推理
         try {
-            // 目前 InferenceEngine 的 Predict 接口只支持单次推理
-            // 所以先模拟逐个推理，后面需要修改 InferenceEngine 以支持真正的批量推理
-            std::cout << "[WorkerThread] Executing batch inference for " << batch.size() << " requests." << std::endl;
-            for (auto& req : batch) {
-                auto result = engine_->Predict(req->image_bytes);
-                req->promise.set_value(result);
+            std::cout << "[WorkerThread] 正在执行批量推理，请求数: " << batch.size() << std::endl;
+
+            std::vector<std::vector<uint8_t>> batch_images;
+            batch_images.reserve(batch.size());
+            for (const auto& req : batch) {
+                batch_images.push_back(req->image_bytes);
+            }
+
+            auto results = engine_->PredictBatch(batch_images);
+
+            for (size_t i = 0; i < batch.size(); ++i) {
+                batch[i]->promise.set_value(results[i]);
             }
         } catch (...) {
             for (auto& req : batch) {
