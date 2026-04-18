@@ -13,7 +13,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 find_package(Protobuf REQUIRED)
 
 # Protobuf 自动生成配置
-set(PROTO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(PROTO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/protos)
 set(PROTO_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR})
 file(MAKE_DIRECTORY ${PROTO_BUILD_DIR})
 
@@ -47,14 +47,12 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 # ==============================================================================
-# 包含目录
+# 目录配置
 # ==============================================================================
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROTO_BUILD_DIR}
-    /usr/local/include
-    /usr/include
-)
+set(PROJECT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set(PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(PROJECT_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+set(PROJECT_THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 # ==============================================================================
 # 目标可执行程序 (供未来开发阶段使用的占位代码)
@@ -72,13 +70,34 @@ include_directories(
 #     Threads::Threads
 # )
 
-add_executable(test_inference test_inference.cpp inference_engine.cpp)
+add_executable(test_inference
+    ${PROJECT_TEST_DIR}/test_inference.cpp
+    ${PROJECT_SOURCE_DIR}/inference_engine.cpp
+)
+target_include_directories(test_inference PRIVATE
+    ${PROJECT_INCLUDE_DIR}
+    ${PROJECT_THIRD_PARTY_DIR}
+    ${PROTO_BUILD_DIR}
+    /usr/local/include
+    /usr/include
+)
 target_link_libraries(test_inference
     ${ONNXRUNTIME_LIB}
     Threads::Threads
 )
 
-add_executable(test_batching test_batching.cpp batching_queue.cpp inference_engine.cpp)
+add_executable(test_batching
+    ${PROJECT_TEST_DIR}/test_batching.cpp
+    ${PROJECT_SOURCE_DIR}/batching_queue.cpp
+    ${PROJECT_SOURCE_DIR}/inference_engine.cpp
+)
+target_include_directories(test_batching PRIVATE
+    ${PROJECT_INCLUDE_DIR}
+    ${PROJECT_THIRD_PARTY_DIR}
+    ${PROTO_BUILD_DIR}
+    /usr/local/include
+    /usr/include
+)
 target_link_libraries(test_batching
     ${ONNXRUNTIME_LIB}
     Threads::Threads

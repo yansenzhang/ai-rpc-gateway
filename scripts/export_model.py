@@ -1,5 +1,6 @@
 import torch
 import torchvision.models as models
+from pathlib import Path
 
 def main():
     print("Loading pretrained ResNet18 model...")
@@ -11,7 +12,8 @@ def main():
     # 创建 Dummy Input，设置 batch_size 为 1，3通道，224x224 尺寸
     dummy_input = torch.randn(1, 3, 224, 224)
 
-    onnx_file_path = "resnet18.onnx"
+    project_root = Path(__file__).resolve().parent.parent
+    onnx_file_path = project_root / "models" / "resnet18.onnx"
     print(f"Exporting model to {onnx_file_path} with dynamic batch size...")
 
     # 导出模型为 ONNX 格式
