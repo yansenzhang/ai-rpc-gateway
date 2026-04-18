@@ -77,3 +77,9 @@ target_link_libraries(test_inference
     ${ONNXRUNTIME_LIB}
     Threads::Threads
 )
+
+add_executable(test_batching test_batching.cpp batching_queue.cpp inference_engine.cpp)
+target_link_libraries(test_batching
+    ${ONNXRUNTIME_LIB}
+    Threads::Threads
+)
