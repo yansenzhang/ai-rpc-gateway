@@ -9,6 +9,7 @@
 
 namespace {
 
+// 将完整 ZooKeeper 路径拆分为逐级创建节点所需的路径片段。
 std::vector<std::string> SplitPath(const std::string& path) {
     std::vector<std::string> segments;
     std::stringstream stream(path);
@@ -41,6 +42,7 @@ bool ZkClient::Connect(const std::string& hosts, int timeout_ms) {
         return false;
     }
 
+    // 通过条件变量等待 watcher 汇报连接状态，避免调用方立即使用尚未就绪的句柄。
     std::unique_lock<std::mutex> lock(mutex_);
     bool connected = connected_cv_.wait_for(lock,
                                             std::chrono::milliseconds(timeout_ms),
@@ -117,6 +119,8 @@ void ZkClient::HandleWatcher(int type, int state, const char* path) {
     (void)path;
 
     std::lock_guard<std::mutex> lock(mutex_);
+
+    // 只要进入可读写或只读连接态，就视为底层会话已经建立。
     connected_ = (state == ZOO_CONNECTED_STATE || state == ZOO_READONLY_STATE);
     if (connected_) {
         connected_cv_.notify_all();
@@ -138,6 +142,7 @@ bool ZkClient::CreatePersistentNode(const std::string& path) {
         return false;
     }
 
+    // 对不存在的层级节点按需创建持久节点，供后续实例临时节点挂载。
     int create_rc = zoo_create(handle_,
                                path.c_str(),
                                "",

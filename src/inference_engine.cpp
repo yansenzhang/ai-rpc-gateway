@@ -1,8 +1,9 @@
 #include "inference_engine.h"
-#include <stdexcept>
+
 #include <algorithm>
-#include <iostream>
 #include <cmath>
+#include <iostream>
+#include <stdexcept>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -13,14 +14,12 @@
 InferenceEngine::InferenceEngine(const std::string& model_path)
     : env_(ORT_LOGGING_LEVEL_WARNING, "AI-Gateway-Env"),
       memory_info_(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {
-
-    // 创建会话配置选项
+    // 创建会话配置，并将算子内部并行度收敛到较小值，避免与上层批处理并发过度竞争 CPU。
     Ort::SessionOptions session_options;
     session_options.SetIntraOpNumThreads(1);
 
-    // 加载模型
+    // 加载 ONNX 模型并缓存输入输出节点名，后续推理可直接复用。
     session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), session_options);
-
     input_node_names_ = {input_name_.c_str()};
     output_node_names_ = {output_name_.c_str()};
 
@@ -31,22 +30,23 @@ InferenceEngine::~InferenceEngine() = default;
 
 std::vector<float> InferenceEngine::Preprocess(const std::vector<uint8_t>& image_bytes) {
     int width, height, channels;
-    // 从内存中加载图像
+
+    // 从内存字节流中解码图像，并强制转换为 3 通道 RGB 数据。
     unsigned char* img_data = stbi_load_from_memory(
         image_bytes.data(), static_cast<int>(image_bytes.size()),
-        &width, &height, &channels, 3); // 强制使用 3 通道 (RGB)
+        &width, &height, &channels, 3);
 
     if (!img_data) {
         throw std::runtime_error("Failed to decode image");
     }
 
-    // 缩放至 224x224 分辨率
+    // 将输入图像缩放到模型要求的 224x224 分辨率。
     const int target_w = 224;
     const int target_h = 224;
     const int target_c = 3;
     unsigned char* resized_data = new unsigned char[target_w * target_h * target_c];
 
-    // 使用 STBIR_FILTER_TRIANGLE (双线性插值) 滤波器，尽可能对齐 PIL 的双线性插值逻辑
+    // 使用三角滤波器实现双线性插值，使缩放效果尽量贴近常见图像预处理流程。
     STBIR_RESIZE resize;
     stbir_resize_init(&resize, img_data, width, height, 0, resized_data, target_w, target_h, 0, (stbir_pixel_layout)target_c, STBIR_TYPE_UINT8);
     stbir_set_filters(&resize, STBIR_FILTER_TRIANGLE, STBIR_FILTER_TRIANGLE);
@@ -54,8 +54,7 @@ std::vector<float> InferenceEngine::Preprocess(const std::vector<uint8_t>& image
 
     stbi_image_free(img_data);
 
-    // 归一化并转换为 NCHW 内存布局
-    // ResNet18 使用 ImageNet 数据集的均值与标准差
+    // 按 ResNet18 的输入要求做归一化，并把像素从 HWC 排列转换为 NCHW 排列。
     std::vector<float> tensor_data(target_w * target_h * target_c);
     const float mean[3] = {0.485f, 0.456f, 0.406f};
     const float std_dev[3] = {0.229f, 0.224f, 0.225f};
@@ -64,11 +63,11 @@ std::vector<float> InferenceEngine::Preprocess(const std::vector<uint8_t>& image
         for (int y = 0; y < target_h; ++y) {
             for (int x = 0; x < target_w; ++x) {
                 int hw_idx = y * target_w + x;
-                int nhwc_idx = c * (target_h * target_w) + hw_idx; // NCHW 内存布局 (N=1)
-                int hwc_idx = hw_idx * target_c + c;               // HWC 内存布局 (来自 stb 库)
+                int nchw_idx = c * (target_h * target_w) + hw_idx;
+                int hwc_idx = hw_idx * target_c + c;
 
                 float pixel = resized_data[hwc_idx] / 255.0f;
-                tensor_data[nhwc_idx] = (pixel - mean[c]) / std_dev[c];
+                tensor_data[nchw_idx] = (pixel - mean[c]) / std_dev[c];
             }
         }
     }
@@ -78,33 +77,30 @@ std::vector<float> InferenceEngine::Preprocess(const std::vector<uint8_t>& image
 }
 
 std::pair<int, float> InferenceEngine::Predict(const std::vector<uint8_t>& image_bytes) {
-    // 1. 预处理
+    // 先将单张图像预处理为模型输入张量。
     std::vector<float> input_tensor_values = Preprocess(image_bytes);
 
-    // 2. 准备输入张量
-    std::vector<int64_t> input_shape = {1, 3, 224, 224}; // 批处理大小 (Batch size) 为 1
+    // 单样本推理的批次维固定为 1。
+    std::vector<int64_t> input_shape = {1, 3, 224, 224};
 
     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
         memory_info_,
         input_tensor_values.data(),
         input_tensor_values.size(),
         input_shape.data(),
-        input_shape.size()
-    );
+        input_shape.size());
 
-    // 3. 执行推理
+    // 执行一次前向推理，得到模型输出 logits。
     auto output_tensors = session_->Run(
         Ort::RunOptions{nullptr},
         input_node_names_.data(),
         &input_tensor, 1,
-        output_node_names_.data(), 1
-    );
+        output_node_names_.data(), 1);
 
-    // 4. 后处理 (寻找 argmax)
+    // 对输出执行 Softmax，并选取概率最大的类别作为最终结果。
     float* floatarr = output_tensors.front().GetTensorMutableData<float>();
     size_t output_count = output_tensors.front().GetTensorTypeAndShapeInfo().GetElementCount();
 
-    // 计算 Softmax
     std::vector<float> probs(output_count);
     float max_val = *std::max_element(floatarr, floatarr + output_count);
     float sum_exp = 0.0f;
@@ -127,12 +123,14 @@ std::pair<int, float> InferenceEngine::Predict(const std::vector<uint8_t>& image
 }
 
 std::vector<std::pair<int, float>> InferenceEngine::PredictBatch(const std::vector<std::vector<uint8_t>>& batch_image_bytes) {
-    if (batch_image_bytes.empty()) return {};
+    if (batch_image_bytes.empty()) {
+        return {};
+    }
 
     size_t batch_size = batch_image_bytes.size();
     size_t single_image_elements = 3 * 224 * 224;
 
-    // 1. 预处理并拼接所有输入张量
+    // 先逐张预处理，再把所有样本按批次顺序拼接成连续输入张量。
     std::vector<float> batched_tensor_values;
     batched_tensor_values.reserve(batch_size * single_image_elements);
 
@@ -141,7 +139,7 @@ std::vector<std::pair<int, float>> InferenceEngine::PredictBatch(const std::vect
         batched_tensor_values.insert(batched_tensor_values.end(), tensor_data.begin(), tensor_data.end());
     }
 
-    // 2. 准备输入张量
+    // 批量推理时仅调整批次维，其余输入形状与单样本保持一致。
     std::vector<int64_t> input_shape = {static_cast<int64_t>(batch_size), 3, 224, 224};
 
     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
@@ -149,23 +147,21 @@ std::vector<std::pair<int, float>> InferenceEngine::PredictBatch(const std::vect
         batched_tensor_values.data(),
         batched_tensor_values.size(),
         input_shape.data(),
-        input_shape.size()
-    );
+        input_shape.size());
 
-    // 3. 执行推理
+    // 一次性执行整批样本推理。
     auto output_tensors = session_->Run(
         Ort::RunOptions{nullptr},
         input_node_names_.data(),
         &input_tensor, 1,
-        output_node_names_.data(), 1
-    );
+        output_node_names_.data(), 1);
 
-    // 4. 后处理 (分别寻找每个样本的 argmax)
+    // 逐个样本解析输出，并分别计算类别概率。
     float* floatarr = output_tensors.front().GetTensorMutableData<float>();
     auto type_info = output_tensors.front().GetTensorTypeAndShapeInfo();
     auto output_shape = type_info.GetShape();
 
-    // ResNet18 的输出通常是 [batch_size, 1000]
+    // 当前模型输出约定为 [batch_size, num_classes]。
     size_t num_classes = output_shape[1];
 
     std::vector<std::pair<int, float>> results;
@@ -174,7 +170,6 @@ std::vector<std::pair<int, float>> InferenceEngine::PredictBatch(const std::vect
     for (size_t b = 0; b < batch_size; ++b) {
         float* sample_logits = floatarr + (b * num_classes);
 
-        // 计算 Softmax
         std::vector<float> probs(num_classes);
         float max_val = *std::max_element(sample_logits, sample_logits + num_classes);
         float sum_exp = 0.0f;

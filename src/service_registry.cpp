@@ -14,6 +14,7 @@ bool ServiceRegistry::Register(const std::string& service_name,
         return false;
     }
 
+    // 统一采用 /ai-rpc-gateway/services/<service>/providers/<endpoint> 目录结构注册实例。
     const std::string root_path = "/ai-rpc-gateway/services";
     const std::string service_path = root_path + "/" + service_name;
     const std::string providers_path = service_path + "/providers";
@@ -25,6 +26,7 @@ bool ServiceRegistry::Register(const std::string& service_name,
         return false;
     }
 
+    // 具体实例使用临时节点承载，便于连接断开后由 ZooKeeper 自动清理。
     if (!zk_client_->CreateEphemeral(endpoint_path, metadata)) {
         return false;
     }

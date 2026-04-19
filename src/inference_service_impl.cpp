@@ -17,6 +17,7 @@ InferenceServiceImpl::~InferenceServiceImpl() {
 void InferenceServiceImpl::HandleMessage(const muduo::net::TcpConnectionPtr& conn,
                                          const inference::GatewayRpcMessage& request_message,
                                          const SendResponseCallback& send_response) {
+    // 仅接受请求方向的信封消息，其他类型直接视为协议使用错误。
     if (request_message.message_type() != inference::GATEWAY_MESSAGE_TYPE_REQUEST) {
         auto response = BuildErrorResponse(request_message.correlation_id(),
                                            BuildRequestId(request_message),
@@ -26,6 +27,7 @@ void InferenceServiceImpl::HandleMessage(const muduo::net::TcpConnectionPtr& con
         return;
     }
 
+    // 当前服务仅暴露 Predict 方法，避免不受支持的方法进入业务处理流程。
     if (request_message.method_name() != "Predict") {
         auto response = BuildErrorResponse(request_message.correlation_id(),
                                            BuildRequestId(request_message),
@@ -35,6 +37,7 @@ void InferenceServiceImpl::HandleMessage(const muduo::net::TcpConnectionPtr& con
         return;
     }
 
+    // Predict 请求必须携带业务层 payload，否则无法执行实际推理。
     if (!request_message.has_predict_request()) {
         auto response = BuildErrorResponse(request_message.correlation_id(),
                                            BuildRequestId(request_message),
@@ -71,6 +74,7 @@ void InferenceServiceImpl::ProcessPredictRequest(const muduo::net::TcpConnection
                                        ? std::to_string(correlation_id)
                                        : request.request_id();
 
+    // 空图像请求不具备推理意义，直接返回参数错误。
     if (request.image_bytes().empty()) {
         auto response = BuildErrorResponse(correlation_id,
                                            request_id,
@@ -80,6 +84,7 @@ void InferenceServiceImpl::ProcessPredictRequest(const muduo::net::TcpConnection
         return;
     }
 
+    // 对单请求负载设置上限，避免异常大包长期占用内存与工作线程。
     constexpr size_t kMaxImageBytes = 10 * 1024 * 1024;
     if (request.image_bytes().size() > kMaxImageBytes) {
         auto response = BuildErrorResponse(correlation_id,
@@ -94,6 +99,7 @@ void InferenceServiceImpl::ProcessPredictRequest(const muduo::net::TcpConnection
     const uint32_t timeout_ms = request.timeout_ms();
     const int64_t server_start_ts_ms = CurrentTimeMs();
 
+    // 将等待批处理 future 的动作转移到业务线程池，避免阻塞 Muduo I/O 线程。
     worker_pool_.run([this, conn, correlation_id, request_id, image_bytes = std::move(image_bytes), timeout_ms, server_start_ts_ms, send_response]() mutable {
         try {
             auto future = queue_->Submit(std::move(image_bytes));
@@ -130,6 +136,7 @@ void InferenceServiceImpl::ProcessPredictRequest(const muduo::net::TcpConnection
 
             send_response(conn, response);
         } catch (const std::exception& e) {
+            // 队列满属于可预期业务状态，其余异常统一映射为内部错误。
             auto response = BuildErrorResponse(correlation_id,
                                                request_id,
                                                std::string(e.what()) == "BatchingQueue is full"

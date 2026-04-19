@@ -8,7 +8,11 @@ lib/
 __pycache__/
 .venv/
 .vscode-root/
+compile_commands.json
+.cache/
 project_plan.md
 setup_env.md
 CLAUDE.md
 test_images/
+stress_test_report.md
+prompt_readme.txt

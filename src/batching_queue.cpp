@@ -60,7 +60,7 @@ void BatchingQueue::WorkerThread() {
                 break;
             }
 
-            // 以首个请求进入队列的时刻为基准，等待直到凑满一个批次或达到最大时延。
+            // 以当前首个请求开始计时，在“凑满批次”与“达到最大等待时延”之间择一触发。
             auto timeout_time = std::chrono::steady_clock::now() + max_latency_;
             cv_.wait_until(lock, timeout_time, [this] {
                 return queue_.size() >= max_batch_size_ || stop_;
@@ -84,6 +84,7 @@ void BatchingQueue::WorkerThread() {
         try {
             std::cout << "[BatchingQueue] Running batch inference, batch size: " << batch.size() << std::endl;
 
+            // 把批次中的字节流提取出来，交给推理引擎执行一次批量推理。
             std::vector<std::vector<uint8_t>> batch_images;
             batch_images.reserve(batch.size());
             for (const auto& req : batch) {
@@ -95,10 +96,12 @@ void BatchingQueue::WorkerThread() {
                 throw std::runtime_error("PredictBatch returned mismatched result count");
             }
 
+            // 推理成功后，按请求顺序逐一回填结果。
             for (size_t i = 0; i < batch.size(); ++i) {
                 batch[i]->promise.set_value(results[i]);
             }
         } catch (...) {
+            // 若整批推理失败，则把同一个异常传播给该批次中的所有等待方。
             for (auto& req : batch) {
                 req->promise.set_exception(std::current_exception());
             }
