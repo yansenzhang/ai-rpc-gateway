@@ -7,7 +7,7 @@
 ![Protobuf](https://img.shields.io/badge/Protobuf-RPC%20Envelope-3367D6?style=flat-square)
 ![ZooKeeper](https://img.shields.io/badge/ZooKeeper-Service%20Discovery-D22128?style=flat-square)
 
-> 这是为了研究“高并发网络 I/O 如何与底层模型推理衔接”而做的个人项目。实现了一条完整的推理链路：请求接入、动态批处理、CPU 推理、以及可选的服务注册发现。
+> 这是一个为了研究“高并发网络 I/O 如何与底层模型推理衔接”而做的个人项目。实现了一条完整的推理链路：请求接入、动态批处理、CPU 推理、以及可选的服务注册发现。
 
 ---
 
@@ -62,11 +62,11 @@
 
 - 减少依赖复杂度
 - 保持预处理路径清晰可控
-- 更适合这个项目以“推理链路研究”为主的定位
+- 更适合这个以“推理链路研究”为主的项目
 
 当前 `InferenceEngine::Preprocess(...)` 会将图像缩放到 `224x224`，再按 ImageNet 的均值与方差完成归一化，并转换成模型输入张量。
 
-这一步的重点是**预处理行为的稳定性与可复现性**。在跨语言部署场景下，真正影响结果一致性的通常不是模型本身，而是：
+这一步的重点是**预处理行为的稳定性与可复现性**。因为在跨语言部署场景下，真正影响结果一致性的通常不是模型本身，而是：
 
 - resize 行为
 - 像素采样方式
@@ -85,12 +85,12 @@
 /ai-rpc-gateway/services/<service_name>/providers/<ip:port>
 ```
 
-这里的设计点：
+这里的设计是：
 
 - 实例节点使用 **ephemeral node（临时节点）**
 - ZooKeeper 失败时，**主 RPC 服务仍继续工作**
 
-也就是说，ZooKeeper 在这里是增强能力，而不是主推理链路的强依赖。
+ZooKeeper 在这里是增强能力，而不是主推理链路的强依赖。
 
 ---
 
@@ -129,24 +129,22 @@
 | 500 | 4000 | 235 | 3765 | 5.88% | 2.93 | 9844.00 ms |
 | 1000 | 4000 | 0 | 4000 | 0.00% | 0.00 | N/A |
 
-### 我对这组数据的理解
+### 结果分析
 
-这组结果很符合一个纯 CPU 服务在接近容量上限时的表现：
+这组结果符合一个纯 CPU 服务在接近容量上限时的表现：
 
 - 并发从 `50` 提到 `200`，**QPS 基本不再提升**，说明系统已经接近稳定吞吐上限
 - 但这时 **P99 延迟继续大幅变差**，说明队列等待时间正在累积
 - 到 `500` 并发时，大量请求已经在超时前等不到结果
 - 到 `1000` 并发时，系统已经完全进入过载区
 
-如果用排队论的语言说，就是：当请求到达率 `λ` 逼近服务能力 `μ` 时，系统不一定立刻掉吞吐，但尾延迟会先失控；再往上推，超时和失败才会集中出现。
+根据排队论，当请求到达率 `λ` 逼近服务能力 `μ` 时，系统不一定立刻掉吞吐，但尾延迟会先失控；再往上推，超时和失败才会集中出现。
 
-可以得出结论：
+由此可以得出结论：
 
 - 当前稳定极限 QPS 大约在 **24 左右**
 - **并发 50 左右** 是更合理的工作点
 - 再继续加压，主要增加的是排队时间，而不是吞吐收益
-
-> 对在线推理服务来说，吞吐上限往往不是最先暴露问题的指标，P99 才是。
 
 ---
 
@@ -170,7 +168,7 @@
 - ONNX Runtime（**CPU 版本**）
 - ZooKeeper C Client（`zookeeper_mt`，可选）
 
-> 本项目明确只考虑 **CPU 推理**，不包含 CUDA / TensorRT 路径。
+> 本项目只考虑 **CPU 推理**，不包含 CUDA / TensorRT 路径。
 
 ### 2. 构建项目
 
@@ -246,53 +244,7 @@ python3 ./scripts/stress_test.py \
 
 ---
 
-## 仓库目录结构
-
-```text
-.
-├── CMakeLists.txt
-├── CLAUDE.md
-├── project_plan.md
-├── prompt_readme.txt
-├── compile_commands.json -> build/compile_commands.json
-├── include
-│   ├── batching_queue.h
-│   ├── inference_engine.h
-│   ├── inference_service_impl.h
-│   ├── rpc_protocol.h
-│   ├── rpc_server.h
-│   ├── service_registry.h
-│   └── zk_client.h
-├── src
-│   ├── batching_queue.cpp
-│   ├── inference_engine.cpp
-│   ├── inference_service_impl.cpp
-│   ├── main.cpp
-│   ├── rpc_protocol.cpp
-│   ├── rpc_server.cpp
-│   ├── service_registry.cpp
-│   └── zk_client.cpp
-├── protos
-│   └── inference.proto
-├── models
-│   ├── resnet18.onnx
-│   └── resnet18.onnx.data
-├── scripts
-│   ├── export_model.py
-│   └── stress_test.py
-├── tests
-│   ├── test_batching.cpp
-│   ├── test_inference.cpp
-│   └── test_rpc_client.cpp
-├── third_party
-│   ├── stb_image.h
-│   └── stb_image_resize2.h
-└── build
-```
-
----
-
-## 我做这个项目时比较关心的点
+## 做这个项目时的关注点
 
 - C++ 服务端里的 dynamic batching 怎么实现
 - Muduo 和 ONNX Runtime 怎么衔接
